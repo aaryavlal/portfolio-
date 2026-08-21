@@ -16,10 +16,10 @@
 
 title: Open Coding 
 description: "Class of 2026"
-owner_name: John Mortensen
-github_username: jm1021 
-github_repo: "portfolio" 
-baseurl: "/portfolio" 
+owner_name: Aaryav Lal
+github_username: aaryavlal
+github_repo: "portfolio-" 
+baseurl: "/portfolio-" 
 future: true
 
 # Build settings
