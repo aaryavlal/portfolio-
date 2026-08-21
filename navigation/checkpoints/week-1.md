@@ -1,13 +1,9 @@
 ---
 layout: post
-title: Week 1 Checkpoint — Java Toolchain Setup & Lesson Remix
+title: Week 1 Checkpoint, Java Toolchain Setup & Lesson Remix
 description: Getting every Java tool the portfolio README asks for onto WSL/Ubuntu, the four things that broke along the way, and rebuilding the Code Runners lesson as an interactive arcade.
 permalink: /checkpoints/week-1/
 comments: true
-type: ccc
-courses: { csa: {week: 1} }
-categories: [Tools]
-toc: true
 ---
 
 ## Part 1 — Java Toolchain Setup
