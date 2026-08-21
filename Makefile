@@ -3,6 +3,13 @@ PORT ?= 4500
 LOG_FILE = /tmp/jekyll$(PORT).log
 PYTHON := venv/bin/python3
 
+# Local backend for the lesson code runners (see scripts/code_runner_server.py).
+# assets/js/api/config.js points the runners at these ports on localhost.
+RUNNER_PYTHON_PORT ?= 8587
+RUNNER_JAVA_PORT ?= 8585
+RUNNER_LOG = /tmp/code-runners.log
+RUNNER_PID = /tmp/.code_runners.pid
+
 SHELL = /bin/bash -c
 .SHELLFLAGS = -e
 
@@ -32,7 +39,7 @@ KNOWN_TARGETS := \
 	build-registered-projects build-registered-docs build-dev-projects \
 	watch-registered-projects clean-registered-projects watch-dev-projects \
 	list-projects split-courses clean-courses use-minima use-cayman use-yat \
-	use-so-simple use-hydejack watch-rebuild
+	use-so-simple use-hydejack watch-rebuild runners stop-runners
 
 ###########################################
 # Capture ORIGINAL CLI Goals
@@ -231,7 +238,7 @@ clean-registered-projects:
 	$(call run_projects,$(ALL_PROJECTS),Cleaning docs,docs-clean)
 
 # General serve target (uses whatever is in _config.yml/Gemfile)
-serve-current: stop build-registered-projects convert split-courses build-registered-docs jekyll-serve
+serve-current: stop build-registered-projects convert split-courses build-registered-docs jekyll-serve runners
 
 # Build with selected theme
 build-minima: use-minima build-current
@@ -328,7 +335,7 @@ clean: stop
 	@echo "Cleaning auto-generated Makefiles..."
 	@find _projects -name "Makefile" ! -path "*/_template/*" -type f -exec rm {} +
 
-stop:
+stop: stop-runners
 	@echo "Stopping server..."
 	@@lsof -ti :$(PORT) | xargs kill >/dev/null 2>&1 || true
 	@echo "Stopping logging process..."
@@ -395,6 +402,7 @@ dev: stop clean
 	@$(MAKE) build-dev-projects ORIGINAL_GOALS="$(ORIGINAL_GOALS)"
 	@$(MAKE) convert-registered-notebooks ORIGINAL_GOALS="$(ORIGINAL_GOALS)"
 	@$(MAKE) jekyll-serve ORIGINAL_GOALS="$(ORIGINAL_GOALS)"
+	@$(MAKE) runners
 	@echo "Initializing watch markers..."
 	@touch /tmp/.notebook_watch_marker /tmp/.project_watch_marker
 	@sleep 1
@@ -455,6 +463,42 @@ bundle-install:
 		bundle install; \
 		mkdir -p .bundle && touch .bundle/install_marker; \
 	fi
+
+# Start the local code-runner backend that the lesson pages POST to.
+# Without this, the runner's play button fails on localhost: assets/js/api/config.js
+# swings pythonURI/javaURI to localhost:$(RUNNER_PYTHON_PORT)/$(RUNNER_JAVA_PORT), and
+# nothing is listening there. Production uses flask/spring.opencodingsociety.com instead.
+runners:
+	@if lsof -ti :$(RUNNER_PYTHON_PORT) >/dev/null 2>&1; then \
+		echo "Code runners already listening on :$(RUNNER_PYTHON_PORT)"; \
+	else \
+		RUNNER_PY=$$( [ -x "$(PYTHON)" ] && echo "$(PYTHON)" || command -v python3 ); \
+		RUNNER_PYTHON_PORT=$(RUNNER_PYTHON_PORT) RUNNER_JAVA_PORT=$(RUNNER_JAVA_PORT) \
+			nohup $$RUNNER_PY scripts/code_runner_server.py > $(RUNNER_LOG) 2>&1 & \
+		echo $$! > $(RUNNER_PID); \
+		for i in 1 2 3 4 5 6 7 8 9 10; do \
+			if curl -sf http://localhost:$(RUNNER_PYTHON_PORT)/health >/dev/null 2>&1; then break; fi; \
+			sleep 1; \
+		done; \
+		if curl -sf http://localhost:$(RUNNER_PYTHON_PORT)/health >/dev/null 2>&1; then \
+			echo "Code runners started (python/js :$(RUNNER_PYTHON_PORT), java :$(RUNNER_JAVA_PORT))"; \
+		else \
+			echo "Code runners failed to start - see $(RUNNER_LOG)"; \
+			cat $(RUNNER_LOG) 2>/dev/null || true; \
+		fi; \
+	fi
+	@if ! command -v javac >/dev/null 2>&1; then \
+		echo "  NOTE: no javac on PATH - Java runners will report an error."; \
+		echo "        Install a JDK: sudo apt install default-jdk"; \
+	fi
+	@if ! command -v node >/dev/null 2>&1; then \
+		echo "  NOTE: no node on PATH - JavaScript falls back to in-browser eval."; \
+	fi
+
+stop-runners:
+	@lsof -t -i :$(RUNNER_PYTHON_PORT) -i :$(RUNNER_JAVA_PORT) 2>/dev/null | xargs kill >/dev/null 2>&1 || true
+	@if [ -f $(RUNNER_PID) ]; then kill $$(cat $(RUNNER_PID)) >/dev/null 2>&1 || true; fi
+	@rm -f $(RUNNER_PID)
 
 # Start Jekyll server (no auto-watch, we control rebuilds manually)
 # Supports optional _config.local.yml override for local settings (e.g. baseurl)
@@ -528,6 +572,8 @@ help:
 	@echo "Core Commands:"
 	@echo "  make              - Full conversion, serve, and watch for file changes (auto-convert on save)"
 	@echo "  make dev          - Fast dev mode (auto-detect :dev projects)"
+	@echo "  make runners      - Start the local code-runner backend (:$(RUNNER_PYTHON_PORT) python/js, :$(RUNNER_JAVA_PORT) java)"
+	@echo "  make stop-runners - Stop the local code-runner backend"
 	@echo "  make dev <proj>   - Dev mode + include additional project(s), replace <proj> with project: make dev gamify"
 	@echo "  make dev p1 p2    - Include multiple projects"
 	@echo "  make serve        - Convert and serve (no auto-convert watching)"
